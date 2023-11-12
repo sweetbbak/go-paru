@@ -85,31 +85,105 @@ func askForConfirmation(s string) bool {
 	}
 }
 
-func main() {
-	fmt.Println()
-	out := fzf(`paru --color=always -Sl | sed -E 's: :/:; s/ (\x1b\[[0-9;]*m)?unknown-version/\1/' | fzf -m --ansi --preview='paru -Si {1} | grep --color=never -v "v " | bat -p -l yaml --color=always'`)
-	output := strings.Split(out, "\n")
+func statCmd() string {
 	paru, err := exec.LookPath("paru")
-	if err != nil {
-		fmt.Println(err)
-		paru = "sudo pacman"
+	if err == nil {
+		return paru
+	} else {
+		paru, err = exec.LookPath("pacman")
+		sudo, _ := exec.LookPath("sudo")
+		return fmt.Sprintf("%s %s", sudo, paru)
 	}
-	args := "-S"
+}
+
+var (
+	args string
+	aur  string
+	tail []string
+)
+
+var usage = `USAGE:
+paruz <paru-opts>
+a FZF terminal UI for paru or pacman
+sudo is invoked automatically if needed.
+Multiple packages can be selected.
+
+OPTIONS:
+	-h | --help    show this help message
+	-S | -Syu      pass these args to paru
+	-R | -Rns      remove packages
+
+** NOTE ** The first arguments are automatically passed to paru / pacman
+paruz <args-to-be-passed>
+if none are passed "-S" is used automatically
+
+FZF-KEYS:
+	TAB            Select/Deselect
+	Shift+TAB      Deselect
+	ENTER          Install/remove selected packages
+
+Examples:
+	paruz -Syu --nocleanafter
+	parus -Rns
+
+	`
+
+func init() {
+	// default is to install
+	// args = "-S"
+	if len(os.Args) >= 2 {
+		if os.Args[1] == "-h" || os.Args[1] == "--help" {
+			fmt.Println(usage)
+			os.Exit(0)
+		}
+
+		if os.Args[1] != "" {
+			// args = os.Args[1]
+			args = strings.Join(os.Args[1:], " ")
+		} else {
+			args = "-S"
+		}
+	}
+}
+
+func main() {
+	out := fzf(`paru --color=always -Sl | sed -E 's: :/:; s/ (\x1b\[[0-9;]*m)?unknown-version/\1/' | fzf -m --ansi --preview='paru -Si {1} | grep --color=never -v "v " | bat -p -l yaml --color=always'`)
+	if out == "" {
+		fmt.Println("Nothing selected")
+		os.Exit(0)
+	}
+
+	output := strings.Split(out, "\n")
+
+	paru := statCmd()
+	if paru == "" {
+		fmt.Println("Couldnt find paru or pacman")
+		os.Exit(1)
+	}
 
 	var pkgs []string
 	for x := range output {
 		pkg := output[x]
 		strip := strings.Split(pkg, " ")
-		// fmt.Println(strip[0])
 		pkg = strip[0]
 		pkgs = append(pkgs, pkg)
 	}
 
-	fmt.Println(pkgs)
 	cmdstr := strings.Join(pkgs, " ")
 	cmd := fmt.Sprintf("%s %s %s", paru, args, cmdstr)
+
+	fmt.Println(pkgs)
 	fmt.Println(cmd)
-	if askForConfirmation("Install these packages?: ") {
-		System(cmd)
+
+	if strings.Contains(args, "-R") {
+		if askForConfirmation("Remove these packages?: ") {
+			System(cmd)
+		}
+	}
+
+	if strings.Contains(args, "-S") {
+		if askForConfirmation("Install these packages?: ") {
+			System(cmd)
+		}
 	}
 }
